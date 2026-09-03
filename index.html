@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>The Last Employee — Prototype</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: #080a0c;
+    color: #d7dce0;
+    font-family: Consolas, "Courier New", monospace;
+    overflow: hidden;
+  }
+  #game {
+    display: flex;
+    height: 100vh;
+    width: 100vw;
+  }
+  #left {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    padding: 18px;
+  }
+  #title {
+    color: #66e3c4;
+    font-size: 18px;
+    margin-bottom: 8px;
+  }
+  #help {
+    color: #7d858d;
+    font-size: 13px;
+    margin-bottom: 12px;
+  }
+  #map {
+    flex: 1;
+    display: grid;
+    align-content: center;
+    justify-content: center;
+    gap: 0;
+    background: #050607;
+    border: 1px solid #252a2e;
+    padding: 12px;
+    overflow: auto;
+  }
+  .cell {
+    width: 31px;
+    height: 31px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 19px;
+    user-select: none;
+  }
+  .floor { background: #101417; color: #555e64; }
+  .wall { background: #30363a; color: #697278; }
+  .door { background: #171d20; color: #d3a84d; }
+  .desk { background: #15191b; color: #8f6f50; }
+  .computer { background: #15191b; color: #58b9d6; }
+  .player { background: #101417; color: white; text-shadow: 0 0 7px #fff; }
+  .item { background: #101417; color: #66e3c4; }
+  .npc { background: #101417; color: #e35c5c; }
+  #right {
+    width: 330px;
+    border-left: 1px solid #292e32;
+    padding: 20px;
+    background: #0b0e10;
+    overflow-y: auto;
+  }
+  h2 {
+    color: #e0bb4c;
+    font-size: 15px;
+    font-weight: normal;
+    margin: 0 0 16px;
+  }
+  .section {
+    border-top: 1px solid #292e32;
+    padding: 14px 0;
+  }
+  .label { color: #737c83; }
+  .green { color: #66e3c4; }
+  .yellow { color: #e0bb4c; }
+  .red { color: #e35c5c; }
+  .blue { color: #66a8e3; }
+  #stats div, #inventory div { margin: 7px 0; }
+  #log {
+    height: 250px;
+    overflow: hidden;
+    color: #9ba3a8;
+    line-height: 1.45;
+    font-size: 12px;
+  }
+  .task {
+    color: #e0bb4c;
+    line-height: 1.45;
+  }
+  #prompt {
+    color: #66e3c4;
+    margin-top: 10px;
+  }
+  @media (max-width: 800px) {
+    #right { width: 270px; }
+    .cell { width: 24px; height: 24px; font-size: 15px; }
+  }
+</style>
+</head>
+<body>
+<div id="game">
+  <div id="left">
+    <div id="title">THE LAST EMPLOYEE — CORPORATE TOWER / FLOOR 3</div>
+    <div id="help">WASD / ARROW KEYS: MOVE &nbsp; • &nbsp; E: EXAMINE &nbsp; • &nbsp; G: PICK UP &nbsp; • &nbsp; I: INVENTORY</div>
+    <div id="map"></div>
+  </div>
+
+  <aside id="right">
+    <h2>HEAD OFFICE TOWER</h2>
+
+    <div class="section" id="location"></div>
+
+    <div class="section" id="stats">
+      <div><span class="label">Health:</span> <span class="green" id="health"></span></div>
+      <div><span class="label">Energy:</span> <span class="green" id="energy"></span></div>
+      <div><span class="label">Hunger:</span> <span class="yellow" id="hunger"></span></div>
+      <div><span class="label">Stress:</span> <span class="red" id="stress"></span></div>
+      <div><span class="label">Time:</span> <span id="time"></span></div>
+    </div>
+
+    <div class="section">
+      <div class="label">INVENTORY</div>
+      <div id="inventory"></div>
+    </div>
+
+    <div class="section">
+      <div class="label">CURRENT TASK</div>
+      <div class="task" id="task"></div>
+    </div>
+
+    <div class="section">
+      <div class="label">MESSAGE LOG</div>
+      <div id="log"></div>
+      <div id="prompt">&gt; _</div>
+    </div>
+  </aside>
+</div>
+
+<script>
+const W = 31, H = 19;
+
+// # wall, . floor, D door, T desk, C computer, F food, R report, S security terminal
+const raw = [
+"###############################",
+"#.............#...............#",
+"#.#############.#############.#",
+"#.#...........#.#.............#",
+"#.#.TTT.......#.#.TTT.........#",
+"#.#.TTT.......D.#.TTT.........#",
+"#.#............#..............#",
+"#.######.###########.########.#",
+"#........#...........#........#",
+"#........#...........#........#",
+"#........#.....@.....#........#",
+"#........#...........#........#",
+"#........#############........#",
+"#.............................#",
+"#.##########.##########.######",
+"#.#........#.#........#......#",
+"#.#...F....D.#....R...#...S..#",
+"#.#........#.#........#......#",
+"###############################"
+];
+
+let map = raw.map(r => r.split(""));
+let player = {x: 16, y: 10};
+let inventory = ["Employee ID Card", "Office Keys"];
+let health = 100, energy = 82, hunger = 18, stress = 24;
+let minutes = 9 * 60 + 14;
+let logLines = [];
+let objective = "Deliver the quarterly report to the CEO's office.";
+let gameWon = false;
+
+function cellAt(x,y){ return map[y]?.[x]; }
+
+function log(msg, cls="") {
+  logLines.push({msg, cls});
+  if (logLines.length > 12) logLines.shift();
+  document.getElementById("log").innerHTML =
+    logLines.map(x => `<div class="${x.cls}">${x.msg}</div>`).join("");
+}
+
+function pad(n){ return String(n).padStart(2,"0"); }
+
+function render() {
+  const mapEl = document.getElementById("map");
+  mapEl.style.gridTemplateColumns = `repeat(${W}, 31px)`;
+  mapEl.innerHTML = "";
+
+  for(let y=0;y<H;y++){
+    for(let x=0;x<W;x++){
+      const c = document.createElement("div");
+      c.className = "cell";
+      let tile = map[y][x];
+      let char = tile;
+
+      if(tile === "#") c.classList.add("wall");
+      else if(tile === "D") c.classList.add("door");
+      else if(tile === "T") c.classList.add("desk");
+      else if(tile === "C") c.classList.add("computer");
+      else if(tile === "F" || tile === "R") c.classList.add("item");
+      else c.classList.add("floor");
+
+      if(x === player.x && y === player.y) {
+        c.className = "cell player";
+        char = "@";
+      } else if(tile === "F") char = "f";
+      else if(tile === "R") char = "!";
+      else if(tile === "S") {
+        c.className = "cell computer";
+        char = "S";
+      }
+
+      c.textContent = char;
+      mapEl.appendChild(c);
+    }
+  }
+
+  document.getElementById("location").innerHTML =
+    `<span class="label">Floor:</span> 3<br>
+     <span class="label">Location:</span> ${locationName()}<br>
+     <span class="label">Day:</span> 3`;
+
+  document.getElementById("health").textContent = bar(health, 100);
+  document.getElementById("energy").textContent = bar(energy, 100);
+  document.getElementById("hunger").textContent = bar(hunger, 100);
+  document.getElementById("stress").textContent = bar(stress, 100);
+  document.getElementById("time").textContent = `${pad(Math.floor(minutes/60))}:${pad(minutes%60)}`;
+
+  document.getElementById("inventory").innerHTML =
+    inventory.map(i => `<div>• ${i}</div>`).join("") || "<div>— empty —</div>";
+
+  document.getElementById("task").textContent = gameWon
+    ? "COMPLETE — Something is wrong with this building."
+    : objective;
+}
+
+function bar(v,max) {
+  const filled = Math.round(v/max*10);
+  return "█".repeat(filled) + "░".repeat(10-filled);
+}
+
+function locationName() {
+  const {x,y}=player;
+  if(y >= 3 && y <= 6 && x <= 14) return "Conference Room B";
+  if(y >= 3 && y <= 6 && x >= 16) return "HR Department";
+  if(y >= 8 && y <= 12 && x <= 8) return "Open Office";
+  if(y >= 15 && y <= 17 && x >= 3 && x <= 10) return "Cafeteria";
+  if(y >= 15 && y <= 17 && x >= 17 && x <= 23) return "Storage";
+  if(x >= 25 && y >= 15) return "Security";
+  return "Main Corridor";
+}
+
+function blocked(x,y) {
+  if(x<0||x>=W||y<0||y>=H) return true;
+  return map[y][x] === "#";
+}
+
+function spendTime(amount=2) {
+  minutes += amount;
+  energy = Math.max(0, energy - 1);
+  hunger = Math.min(100, hunger + 1);
+  if(hunger > 75) stress = Math.min(100, stress + 1);
+}
+
+function move(dx,dy) {
+  if(gameWon) return;
+  const nx = player.x + dx, ny = player.y + dy;
+  if(blocked(nx,ny)) {
+    log("You bump into a wall.");
+    return;
+  }
+  if(map[ny][nx] === "D") {
+    log("The door is locked. Your Employee ID Card is accepted.");
+    map[ny][nx] = ".";
+  }
+  player.x = nx; player.y = ny;
+  spendTime(2);
+
+  if(map[ny][nx] === "F") log("You see a packaged meal here. Press G to pick it up.", "green");
+  if(map[ny][nx] === "R") log("You see the QUARTERLY REPORT here. Press G to pick it up.", "green");
+  if(map[ny][nx] === "S") log("SECURITY TERMINAL. Press E to examine it.", "blue");
+
+  // first strange event
+  if(minutes >= 9*60+28 && !window.event1) {
+    window.event1 = true;
+    stress += 7;
+    log("You hear typing from somewhere nearby...", "red");
+    setTimeout(() => log('"Reminder: Team meeting at 10:30 AM in Conference Room A."'), 400);
+  }
+
+  render();
+}
+
+function pickup() {
+  const tile = map[player.y][player.x];
+  if(tile === "F") {
+    inventory.push("Cafeteria Meal");
+    map[player.y][player.x] = ".";
+    log("You pick up: Cafeteria Meal.", "green");
+  } else if(tile === "R") {
+    inventory.push("Quarterly Report");
+    map[player.y][player.x] = ".";
+    objective = "Deliver the quarterly report to the CEO's office.";
+    log("You pick up: Quarterly Report.", "green");
+  } else {
+    log("There is nothing useful here.");
+  }
+  spendTime(1);
+  render();
+}
+
+function examine() {
+  const tile = map[player.y][player.x];
+
+  if(tile === "S") {
+    log("SECURITY SYSTEM: 4,821 employees currently active.", "red");
+    log("Last system-wide login: 7 years, 4 months ago.");
+    stress = Math.min(100, stress + 4);
+  } else if(tile === "C") {
+    log("The computer is still warm.");
+    log("Last user: MARCUS VALE.");
+    log("Last login: 06/14/2021.");
+  } else if(tile === "D") {
+    log("A locked office door. Your badge reader flashes green.");
+  } else {
+    log(`You examine the area. ${locationName()} appears completely normal.`);
+  }
+  spendTime(3);
+  render();
+}
+
+function showInventory() {
+  log("INVENTORY: " + inventory.join(", "));
+}
+
+document.addEventListener("keydown", e => {
+  const k = e.key.toLowerCase();
+  if(["w","a","s","d","arrowup","arrowdown","arrowleft","arrowright","g","e","i"].includes(k))
+    e.preventDefault();
+
+  if(k==="w" || k==="arrowup") move(0,-1);
+  if(k==="s" || k==="arrowdown") move(0,1);
+  if(k==="a" || k==="arrowleft") move(-1,0);
+  if(k==="d" || k==="arrowright") move(1,0);
+  if(k==="g") pickup();
+  if(k==="e") examine();
+  if(k==="i") showInventory();
+
+  // Demo ending: if player has report and reaches upper-right area
+  if(inventory.includes("Quarterly Report") && player.x >= 24 && player.y <= 7 && !gameWon) {
+    gameWon = true;
+    objective = "COMPLETE";
+    log("You reach the executive floor.", "green");
+    setTimeout(() => {
+      log("There is a nameplate on the CEO's door: 'MARCUS VALE'.", "red");
+      setTimeout(() => log("The door opens by itself."), 700);
+      setTimeout(() => log("You hear: 'You're late, Employee #4721.'", "red"), 1500);
+    }, 600);
+  }
+});
+
+log("GOOD MORNING, EMPLOYEE #4721.", "green");
+log("Today's productivity target: 87%.");
+log("Task 1: Retrieve the quarterly report.");
+log("Task 2: Deliver it to the CEO.");
+log("The office is unusually quiet.");
+render();
+</script>
+</body>
+</html>
